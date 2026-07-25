@@ -10,35 +10,84 @@ import org.jsoup.select.Elements;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.net.SocketTimeoutException;
+import java.net.URI;
+import java.net.UnknownHostException;
 
 @Service
 public class AuditService {
 
     public AuditResponse auditWebsite(AuditRequest request) {
 
+        String url = request.getUrl().trim();
+
+        // Add https:// if user enters github.com instead of https://github.com
+        if (!url.matches("^(http://|https://).+")) {
+            url = "https://" + url;
+        }
+
+        // Validate URL
+        try {
+            URI uri = new URI(url);
+
+            if (uri.getHost() == null || !uri.getHost().contains(".")) {
+                return errorResponse("Invalid URL. Please enter a valid website URL.");
+            }
+
+        } catch (Exception e) {
+            return errorResponse("Invalid URL. Please enter a valid website URL.");
+        }
+
         try {
 
             long startTime = System.currentTimeMillis();
 
-            Connection connection = Jsoup.connect(request.getUrl())
+            Connection connection = Jsoup.connect(url)
                     .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0 Safari/537.36")
                     .header("Accept-Language", "en-US,en;q=0.9")
                     .followRedirects(true)
                     .ignoreHttpErrors(true)
+                    .ignoreContentType(true)
                     .timeout(15000);
 
             Connection.Response response = connection.execute();
 
-            System.out.println("Status Code : " + response.statusCode());
-            System.out.println("Final URL   : " + response.url());
-
-            Document document = response.parse();
-
             long endTime = System.currentTimeMillis();
-
             long responseTime = endTime - startTime;
 
             int status = response.statusCode();
+
+            // Reject HTTP errors
+            if (status >= 400) {
+                return new AuditResponse(
+                        status,
+                        responseTime,
+                        "",
+                        "Website returned HTTP " + status,
+                        0,
+                        0,
+                        0
+                );
+            }
+
+            // Reject PDFs, Images, JSON, ZIPs, etc.
+            String contentType = response.contentType();
+
+            if (contentType == null ||
+                    !contentType.toLowerCase().contains("text/html")) {
+
+                return new AuditResponse(
+                        status,
+                        responseTime,
+                        "",
+                        "The provided URL is not an HTML webpage.",
+                        0,
+                        0,
+                        0
+                );
+            }
+
+            Document document = response.parse();
 
             String title = document.title();
 
@@ -62,7 +111,9 @@ public class AuditService {
                 }
             }
 
-            String bodyText = document.body() != null ? document.body().text() : "";
+            String bodyText = document.body() != null
+                    ? document.body().text()
+                    : "";
 
             int wordCount = bodyText.isBlank()
                     ? 0
@@ -78,19 +129,34 @@ public class AuditService {
                     wordCount
             );
 
+        } catch (SocketTimeoutException e) {
+
+            return errorResponse("The website took too long to respond.");
+
+        } catch (UnknownHostException e) {
+
+            return errorResponse("Website not found.");
+
         } catch (IOException e) {
 
-            e.printStackTrace();
+            return errorResponse("Unable to reach the website.");
 
-            return new AuditResponse(
-                    0,
-                    0,
-                    "",
-                    "Unable to reach website: " + e.getClass().getSimpleName() + " - " + e.getMessage(),
-                    0,
-                    0,
-                    0
-            );
+        } catch (Exception e) {
+
+            return errorResponse("Unexpected error while auditing the website.");
         }
+    }
+
+    private AuditResponse errorResponse(String message) {
+
+        return new AuditResponse(
+                0,
+                0,
+                "",
+                message,
+                0,
+                0,
+                0
+        );
     }
 }
