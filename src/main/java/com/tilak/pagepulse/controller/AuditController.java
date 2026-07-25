@@ -5,7 +5,6 @@ import com.tilak.pagepulse.dto.AuditResponse;
 import com.tilak.pagepulse.service.AuditService;
 import org.springframework.web.bind.annotation.*;
 
-@CrossOrigin(origins = "*")
 @RestController
 @RequestMapping("/api")
 public class AuditController {
